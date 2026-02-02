@@ -2,38 +2,50 @@
 name = "bamboo-server"
 version = "0.1.0"
 edition = "2021"
-
-[lib]
-name = "bamboo_server"
-path = "src/lib.rs"
+authors = ["Nio <nio@example.com>"]
+description = "Bamboo HTTP Server - 修复重复事件发送问题"
 
 [[bin]]
 name = "bamboo-server"
 path = "src/main.rs"
 
 [dependencies]
-bamboo-core = { path = "../bamboo-core" }
-bamboo-config = { path = "../bamboo-config" }
-bamboo-llm = { path = "../bamboo-llm" }
-bamboo-skill = { path = "../bamboo-skill" }
-bamboo-tool = { path = "../bamboo-tool" }
-
-actix-web = "4"
+# 异步运行时
 tokio = { version = "1", features = ["full"] }
-tokio-util = { version = "0.7" }
-tokio-tungstenite = "0.24"
-dashmap = "6"
-futures = "0.3"
+
+# HTTP 框架
+axum = { version = "0.7", features = ["ws"] }
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+
+# WebSocket
 futures-util = "0.3"
+
+# 序列化
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-env_logger = "0.11"
-log = "0.4"
-dirs = "5.0"
-uuid = { version = "1", features = ["v4", "serde"] }
-async-stream = "0.3"
-chrono = { version = "0.4", features = ["serde"] }
-clap = { version = "4", features = ["derive", "env"] }
-async-trait = "0.1"
-thiserror = "1"
+
+# 错误处理
 anyhow = "1"
+thiserror = "1"
+
+# 时间处理
+chrono = { version = "0.4", features = ["serde"] }
+
+# UUID
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# 异步 trait
+async-trait = "0.1"
+
+# 日志
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# HTTP 客户端
+reqwest = { version = "0.11", features = ["json"] }
+
+# 内部依赖
+bamboo-session = { path = "../bamboo-session" }
+
+[dev-dependencies]
+tokio-test = "0.4"
