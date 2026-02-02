@@ -1,53 +1,74 @@
-use std::path::Path;
+use std::path::PathBuf;
 use tokio::fs;
 use serde_json::json;
+
+/// 允许访问的基础目录
+const ALLOWED_BASE_DIR: &str = "/Users/bigduu";
 
 /// 文件系统工具
 pub struct FilesystemTool;
 
 impl FilesystemTool {
+    /// 验证路径安全性：解析绝对路径并确保在允许的基础目录内
+    fn validate_path(path: &str) -> Result<PathBuf, String> {
+        // 检查路径是否为空
+        if path.is_empty() {
+            return Err("Invalid path: path is empty".to_string());
+        }
+
+        // 解析输入路径为绝对路径（处理符号链接和路径规范化）
+        let canonical_path = std::fs::canonicalize(path)
+            .map_err(|e| format!("Invalid path '{}': {}", path, e))?;
+
+        // 解析允许的基础目录
+        let base_path = std::fs::canonicalize(ALLOWED_BASE_DIR)
+            .map_err(|e| format!("Internal error: invalid base directory '{}': {}", ALLOWED_BASE_DIR, e))?;
+
+        // 验证路径是否在允许的基础目录内
+        if !canonical_path.starts_with(&base_path) {
+            return Err(format!(
+                "Access denied: path '{}' is outside the allowed directory '{}'",
+                canonical_path.display(),
+                base_path.display()
+            ));
+        }
+
+        Ok(canonical_path)
+    }
+
     /// 读取文件内容
     pub async fn read_file(path: &str) -> Result<String, String> {
-        // 安全检查：确保路径不包含 ..
-        if path.contains("..") {
-            return Err("Invalid path: contains '..'".to_string());
-        }
+        let validated_path = Self::validate_path(path)?;
         
-        fs::read_to_string(path)
+        fs::read_to_string(&validated_path)
             .await
-            .map_err(|e| format!("Failed to read file '{}': {}", path, e))
+            .map_err(|e| format!("Failed to read file '{}': {}", validated_path.display(), e))
     }
     
     /// 写入文件内容
     pub async fn write_file(path: &str, content: &str) -> Result<(), String> {
-        // 安全检查：确保路径不包含 ..
-        if path.contains("..") {
-            return Err("Invalid path: contains '..'".to_string());
-        }
+        let validated_path = Self::validate_path(path)?;
         
         // 确保父目录存在
-        if let Some(parent) = Path::new(path).parent() {
+        if let Some(parent) = validated_path.parent() {
             fs::create_dir_all(parent)
                 .await
                 .map_err(|e| format!("Failed to create directory '{}': {}", parent.display(), e))?;
         }
         
-        fs::write(path, content)
+        fs::write(&validated_path, content)
             .await
-            .map_err(|e| format!("Failed to write file '{}': {}", path, e))
+            .map_err(|e| format!("Failed to write file '{}': {}", validated_path.display(), e))
     }
     
     /// 列出目录内容
     pub async fn list_directory(path: &str) -> Result<Vec<String>, String> {
-        // 安全检查：确保路径不包含 ..
-        if path.contains("..") {
-            return Err("Invalid path: contains '..'".to_string());
-        }
+        let validated_path = Self::validate_path(path)?;
         
         let mut entries = vec![];
-        let mut dir = fs::read_dir(path)
+        let mut dir = fs::read_dir(&validated_path)
             .await
-            .map_err(|e| format!("Failed to read directory '{}': {}", path, e))?;
+            .map_err(|e| format!("Failed to read directory '{}': {}", validated_path.display(), e))?;
         
         while let Some(entry) = dir.next_entry()
             .await
@@ -66,22 +87,18 @@ impl FilesystemTool {
     
     /// 检查文件是否存在
     pub async fn file_exists(path: &str) -> Result<bool, String> {
-        if path.contains("..") {
-            return Err("Invalid path: contains '..'".to_string());
-        }
+        let validated_path = Self::validate_path(path)?;
         
-        Ok(fs::metadata(path).await.is_ok())
+        Ok(fs::metadata(&validated_path).await.is_ok())
     }
     
     /// 获取文件信息
     pub async fn get_file_info(path: &str) -> Result<String, String> {
-        if path.contains("..") {
-            return Err("Invalid path: contains '..'".to_string());
-        }
+        let validated_path = Self::validate_path(path)?;
         
-        let metadata = fs::metadata(path)
+        let metadata = fs::metadata(&validated_path)
             .await
-            .map_err(|e| format!("Failed to get file info '{}': {}", path, e))?;
+            .map_err(|e| format!("Failed to get file info '{}': {}", validated_path.display(), e))?;
         
         let size = metadata.len();
         let is_file = metadata.is_file();
@@ -230,8 +247,59 @@ mod tests {
 
     #[tokio::test]
     async fn test_path_traversal_protection() {
+        // 测试 .. 路径遍历
         let result = FilesystemTool::read_file("/etc/../etc/passwd").await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Invalid path"));
+        let err = result.unwrap_err();
+        // 应该因为路径在允许目录之外而被拒绝
+        assert!(err.contains("Access denied") || err.contains("Invalid path"), 
+            "Expected access denied or invalid path error, got: {}", err);
+    }
+
+    #[tokio::test]
+    async fn test_symlink_traversal_protection() {
+        // 测试符号链接路径遍历攻击
+        let test_dir = "/tmp/test_mcp_symlink";
+        let symlink_path = format!("{}/evil_link", test_dir);
+        
+        // 创建测试目录和指向 /etc 的符号链接
+        let _ = fs::create_dir_all(test_dir).await;
+        let _ = std::fs::remove_file(&symlink_path);
+        
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let _ = symlink("/etc", &symlink_path);
+            
+            // 尝试通过符号链接访问 /etc/passwd
+            let evil_path = format!("{}/passwd", symlink_path);
+            let result = FilesystemTool::read_file(&evil_path).await;
+            assert!(result.is_err());
+            let err = result.unwrap_err();
+            assert!(err.contains("Access denied"), 
+                "Expected access denied error for symlink traversal, got: {}", err);
+        }
+        
+        // 清理
+        let _ = fs::remove_dir_all(test_dir).await;
+    }
+
+    #[tokio::test]
+    async fn test_allowed_directory_access() {
+        // 测试允许目录内的访问
+        let test_path = "/Users/bigduu/test_mcp_allowed.txt";
+        let test_content = "Test content in allowed directory";
+        
+        // 写入文件
+        let result = FilesystemTool::write_file(test_path, test_content).await;
+        assert!(result.is_ok(), "Should be able to write to allowed directory: {:?}", result);
+        
+        // 读取文件
+        let content = FilesystemTool::read_file(test_path).await;
+        assert!(content.is_ok());
+        assert_eq!(content.unwrap(), test_content);
+        
+        // 清理
+        let _ = fs::remove_file(test_path).await;
     }
 }
