@@ -1,0 +1,109 @@
+# Bamboo Observability 配置示例
+
+app_name = "bamboo"
+environment = "production"
+
+# ============================================
+# 日志配置
+# ============================================
+[logging]
+# 日志级别: trace, debug, info, warn, error
+level = "info"
+
+# 使用 JSON 格式输出
+json_format = true
+
+# 输出到 stdout
+stdout = true
+
+# 输出到文件
+file = true
+
+# 日志文件路径
+file_path = "/var/log/bamboo/bamboo.log"
+
+# 启用 ANSI 颜色（在终端输出时）
+ansi_colors = true
+
+# 包含目标（target）字段
+include_target = true
+
+# 包含线程 ID
+include_thread_id = false
+
+# 包含行号
+include_line_number = true
+
+# 日志轮转配置
+[logging.rotation]
+# 轮转策略: minutely, hourly, daily, never, size
+strategy = "daily"
+
+# 最大保留文件数
+max_files = 7
+
+# 按大小轮转时的最大文件大小（字节）
+# max_size = 104857600  # 100MB
+
+# 模块级别日志配置
+[logging.module_levels]
+bamboo_server = "debug"
+bamboo_gateway = "info"
+bamboo_skill = "warn"
+bamboo_mcp = "error"
+bamboo_core = "info"
+copilot_forward = "debug"
+
+# ============================================
+# 指标配置
+# ============================================
+[metrics]
+# 启用指标收集
+enabled = true
+
+# 监听地址
+host = "0.0.0.0"
+
+# 指标服务器端口
+port = 9090
+
+# 指标前缀
+prefix = "bamboo"
+
+# 启用 Prometheus 导出器
+prometheus_enabled = true
+
+# 自定义标签
+[metrics.labels]
+region = "us-east-1"
+zone = "a"
+version = "0.1.0"
+environment = "production"
+
+# 直方图桶配置（可选）
+# metrics.histogram_buckets = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]
+
+# ============================================
+# 健康检查配置
+# ============================================
+[health]
+# 启用健康检查服务器
+enabled = true
+
+# 监听地址
+host = "0.0.0.0"
+
+# 健康检查服务器端口
+port = 8080
+
+# 健康检查端点路径
+health_path = "/health"
+
+# 就绪检查端点路径
+ready_path = "/ready"
+
+# 指标端点路径
+metrics_path = "/metrics"
+
+# 健康检查超时时间（秒）
+timeout_seconds = 5

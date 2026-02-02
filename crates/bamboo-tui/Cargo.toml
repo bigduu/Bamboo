@@ -1,0 +1,24 @@
+[package]
+name = "bamboo-tui"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "bamboo-tui"
+path = "src/main.rs"
+
+[dependencies]
+bamboo-core = { path = "../bamboo-core" }
+ratatui = { version = "0.24", features = ["all-widgets"] }
+crossterm = { version = "0.27", features = ["event-stream"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", features = ["json", "stream"] }
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+unicode-width = "0.1"
+eventsource-stream = "0.2"
+futures = "0.3"
+log = "0.4"
+env_logger = "0.11"
