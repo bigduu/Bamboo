@@ -10,6 +10,7 @@ mod agent_runner;
 mod logging;
 mod skill_loader;
 mod event_bus;
+mod websocket;
 
 use server::run_server;
 use logging::init_logging;
