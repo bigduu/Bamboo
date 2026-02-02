@@ -10,6 +10,5 @@ members = [
     "crates/bamboo-tool",
     "crates/bamboo-skill",
     "crates/bamboo-session",
-    "crates/bamboo-observability",
 ]
 resolver = "2"
