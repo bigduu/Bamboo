@@ -657,25 +657,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bamboo-gateway"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bamboo-core",
- "chrono",
- "dashmap 6.1.0",
- "futures-util",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
- "tokio-test",
- "tokio-tungstenite",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "bamboo-llm"
 version = "0.1.0"
 dependencies = [
@@ -733,46 +714,31 @@ dependencies = [
 ]
 
 [[package]]
-name = "bamboo-router"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bamboo-core",
- "bamboo-gateway",
- "chrono",
- "dashmap 5.5.3",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
- "tokio-test",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "bamboo-server"
 version = "0.1.0"
 dependencies = [
  "actix-web",
+ "anyhow",
  "async-stream",
  "async-trait",
  "bamboo-config",
  "bamboo-core",
- "bamboo-gateway",
  "bamboo-llm",
  "bamboo-skill",
  "bamboo-tool",
  "chrono",
  "clap",
+ "dashmap 6.1.0",
  "dirs",
  "env_logger",
  "futures",
+ "futures-util",
  "log",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-tungstenite",
  "tokio-util",
  "uuid",
 ]

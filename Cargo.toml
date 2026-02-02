@@ -9,8 +9,6 @@ members = [
     "crates/bamboo-cli",
     "crates/bamboo-tool",
     "crates/bamboo-skill",
-    "crates/bamboo-gateway",
-    "crates/bamboo-router",
     "crates/bamboo-session",
     "crates/bamboo-observability",
 ]
