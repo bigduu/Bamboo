@@ -1,20 +1,22 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
-use bamboo_config::ConfigManager;
+use bamboo_config::{ConfigManager, AuthSettings};
 use bamboo_core::{Session, AgentEvent, storage::JsonlStorage};
 use bamboo_core::tools::{ToolExecutor, ToolCall, ToolResult, ToolSchema, FunctionSchema};
 use bamboo_core::tools::executor::{ToolError, Result as ToolResultResult};
 use bamboo_llm::providers::OpenAiProvider;
+use bamboo_llm::provider::{ProviderConfig, AuthConfig};
 use bamboo_skill::SkillManager;
 use bamboo_tool::types::{ToolDef, ArgType};
 use bamboo_tool::executor::{ToolRunner, ToolExecutor as BambooToolExecutor};
 use async_trait::async_trait;
 
 use crate::event_bus::{EventBus, Event, ReplyChannel, ChatChunk};
+use crate::websocket::{Gateway, GatewayConfig};
 
 /// Gateway 集成类型别名
-pub type GatewayRef = Arc<bamboo_gateway::Gateway>;
+pub type GatewayRef = Arc<Gateway>;
 
 /// ToolExecutor implementation that uses SkillManager to get tools
 pub struct SkillManagerToolExecutor {
@@ -136,10 +138,10 @@ impl AppState {
 
     pub async fn new_with_config(
         config_manager: ConfigManager,
-        provider: &str,
-        llm_base_url: String,
-        model: String,
-        api_key: String,
+        _provider: &str,
+        _llm_base_url: String,
+        _model: String,
+        _api_key: String,
     ) -> Self {
         // 从配置获取存储路径
         let config = config_manager.get().read().await.clone();
@@ -154,15 +156,17 @@ impl AppState {
         let storage = JsonlStorage::new(&storage_path);
         storage.init().await.expect("Failed to init storage");
         
-        // 根据 provider 初始化 LLM Provider
-        log::info!("Creating LLM provider: {} with base URL: {} and model: {}", provider, llm_base_url, model);
-        
-        let llm: Arc<dyn bamboo_llm::LLMProvider> = {
-            log::info!("Using OpenAI-compatible provider");
-            Arc::new(
-                OpenAiProvider::new(api_key)
-                    .expect("Failed to create OpenAiProvider")
-            )
+        // 根据配置创建 LLM Provider
+        let llm: Arc<dyn bamboo_llm::LLMProvider> = match create_llm_provider_from_config(&config).await {
+            Ok(provider) => provider,
+            Err(e) => {
+                log::error!("Failed to create LLM provider from config: {}. Falling back to default Copilot provider.", e);
+                // 向后兼容：如果配置创建失败，使用默认 Copilot provider
+                Arc::new(
+                    OpenAiProvider::copilot().await
+                        .expect("Failed to create default Copilot provider")
+                )
+            }
         };
 
         // 从配置获取 skills 目录
@@ -222,13 +226,13 @@ impl AppState {
 
         // 初始化 Gateway（如果启用）
         let gateway = if config.gateway.enabled {
-            let gateway_config = bamboo_gateway::GatewayConfig {
+            let gateway_config = GatewayConfig {
                 bind: config.gateway.bind.clone(),
                 auth_token: config.gateway.auth_token.clone(),
                 max_connections: config.gateway.max_connections,
                 heartbeat_interval_secs: config.gateway.heartbeat_interval_secs,
             };
-            Some(Arc::new(bamboo_gateway::Gateway::new(gateway_config)))
+            Some(Arc::new(Gateway::new(gateway_config)))
         } else {
             log::info!("Gateway is disabled");
             None
@@ -396,22 +400,24 @@ impl AppState {
 }
 
 /// 将 Event 转换为 GatewayEvent
-fn convert_event_to_gateway_event(event: &Event) -> Result<bamboo_gateway::GatewayEvent, String> {
+fn convert_event_to_gateway_event(event: &Event) -> Result<crate::websocket::GatewayEvent, String> {
+    use crate::websocket::{GatewayEvent, TokenUsage};
+    
     match event {
         Event::ChatResponse { session_id, chunk } => {
             let token = match chunk {
                 ChatChunk::Content { text } => text.clone(),
                 _ => String::new(),
             };
-            Ok(bamboo_gateway::GatewayEvent::AgentToken {
+            Ok(GatewayEvent::AgentToken {
                 session_id: session_id.clone(),
                 token,
             })
         }
         Event::AgentComplete { session_id, usage } => {
-            Ok(bamboo_gateway::GatewayEvent::AgentComplete {
+            Ok(GatewayEvent::AgentComplete {
                 session_id: session_id.clone(),
-                usage: bamboo_gateway::TokenUsage {
+                usage: TokenUsage {
                     prompt_tokens: usage.prompt_tokens,
                     completion_tokens: usage.completion_tokens,
                     total_tokens: usage.total_tokens,
@@ -419,26 +425,26 @@ fn convert_event_to_gateway_event(event: &Event) -> Result<bamboo_gateway::Gatew
             })
         }
         Event::AgentError { message, .. } => {
-            Ok(bamboo_gateway::GatewayEvent::Error {
+            Ok(GatewayEvent::Error {
                 code: "AGENT_ERROR".to_string(),
                 message: message.clone(),
             })
         }
         Event::ToolStart { session_id, tool_name, .. } => {
-            Ok(bamboo_gateway::GatewayEvent::AgentToolStart {
+            Ok(GatewayEvent::AgentToolStart {
                 session_id: session_id.clone(),
                 tool: tool_name.clone(),
             })
         }
         Event::ToolComplete { session_id, tool_call_id, result } => {
-            Ok(bamboo_gateway::GatewayEvent::AgentToolComplete {
+            Ok(GatewayEvent::AgentToolComplete {
                 session_id: session_id.clone(),
                 tool: tool_call_id.clone(),
                 result: result.result.clone(),
             })
         }
         Event::ToolError { tool_call_id, error, .. } => {
-            Ok(bamboo_gateway::GatewayEvent::Error {
+            Ok(GatewayEvent::Error {
                 code: "TOOL_ERROR".to_string(),
                 message: format!("Tool {} error: {}", tool_call_id, error),
             })
@@ -545,6 +551,116 @@ impl Clone for AppState {
             config: self.config.clone(),
             gateway: self.gateway.clone(),
             event_bus: self.event_bus.clone(),
+        }
+    }
+}
+
+/// 根据配置创建 LLM Provider
+/// 
+/// 支持以下 provider:
+/// - "copilot": 使用 Device Code 认证的 GitHub Copilot
+/// - "openai": 使用 API Key 的 OpenAI 或兼容服务
+async fn create_llm_provider_from_config(
+    config: &bamboo_config::Config,
+) -> anyhow::Result<Arc<dyn bamboo_llm::LLMProvider>> {
+    let provider_name = &config.llm.default_provider;
+    log::info!("Creating LLM provider from config: {}", provider_name);
+    
+    // 查找 provider 配置
+    let provider_settings = config.llm.providers.get(provider_name)
+        .ok_or_else(|| anyhow::anyhow!(
+            "Provider '{}' not found in config. Available providers: {:?}",
+            provider_name,
+            config.llm.providers.keys().collect::<Vec<_>>()
+        ))?;
+    
+    if !provider_settings.enabled {
+        return Err(anyhow::anyhow!(
+            "Provider '{}' is disabled in config",
+            provider_name
+        ));
+    }
+    
+    // 将 bamboo_config::AuthSettings 转换为 bamboo_llm::provider::AuthConfig
+    let auth_config = match &provider_settings.auth {
+        AuthSettings::ApiKey { env } => {
+            let api_key = std::env::var(env)
+                .map_err(|_| anyhow::anyhow!(
+                    "API key environment variable '{}' not set for provider '{}'",
+                    env, provider_name
+                ))?;
+            AuthConfig::ApiKey { key: api_key }
+        }
+        AuthSettings::Bearer { env } => {
+            let token = std::env::var(env)
+                .map_err(|_| anyhow::anyhow!(
+                    "Bearer token environment variable '{}' not set for provider '{}'",
+                    env, provider_name
+                ))?;
+            AuthConfig::Bearer { token }
+        }
+        AuthSettings::DeviceCode { client_id, device_code_url, access_token_url, copilot_token_url } => {
+            AuthConfig::DeviceCode {
+                client_id: client_id.clone(),
+                device_code_url: device_code_url.clone().unwrap_or_else(|| 
+                    "https://github.com/login/device/code".to_string()
+                ),
+                access_token_url: access_token_url.clone().unwrap_or_else(|| 
+                    "https://github.com/login/oauth/access_token".to_string()
+                ),
+                copilot_token_url: copilot_token_url.clone().unwrap_or_else(|| 
+                    "https://api.github.com/copilot_internal/v2/token".to_string()
+                ),
+            }
+        }
+        AuthSettings::None => AuthConfig::None,
+    };
+    
+    // 构建 ProviderConfig
+    let model = provider_settings.model.clone()
+        .unwrap_or_else(|| "gpt-4o-mini".to_string());
+    
+    let timeout = std::time::Duration::from_secs(
+        provider_settings.timeout_seconds.unwrap_or(60)
+    );
+    
+    let headers = provider_settings.headers.clone().unwrap_or_default();
+    
+    let provider_config = ProviderConfig {
+        provider_id: provider_name.clone(),
+        base_url: provider_settings.base_url.clone(),
+        auth: auth_config,
+        model,
+        timeout,
+        headers,
+    };
+    
+    log::info!(
+        "Initializing provider '{}' with base URL: {}, model: {}",
+        provider_name,
+        provider_config.base_url,
+        provider_config.model
+    );
+    
+    // 创建 provider
+    match provider_name.as_str() {
+        "copilot" => {
+            log::info!("Creating GitHub Copilot provider with Device Code authentication");
+            let provider = OpenAiProvider::with_config(provider_config).await
+                .map_err(|e| anyhow::anyhow!(
+                    "Failed to create Copilot provider: {}",
+                    e
+                ))?;
+            Ok(Arc::new(provider))
+        }
+        "openai" | _ => {
+            log::info!("Creating OpenAI-compatible provider");
+            let provider = OpenAiProvider::with_config(provider_config).await
+                .map_err(|e| anyhow::anyhow!(
+                    "Failed to create OpenAI provider: {}",
+                    e
+                ))?;
+            Ok(Arc::new(provider))
         }
     }
 }
