@@ -142,7 +142,18 @@ impl Gateway {
     /// Run the gateway server
     pub async fn run(&self) -> Result<(), GatewayError> {
         let addr: SocketAddr = self.config.bind.parse()?;
-        let listener = TcpListener::bind(&addr).await?;
+        info!("Attempting to bind Gateway to: {}", addr);
+        
+        let listener = match TcpListener::bind(&addr).await {
+            Ok(l) => {
+                info!("Gateway successfully bound to: {}", addr);
+                l
+            }
+            Err(e) => {
+                error!("Failed to bind Gateway to {}: {}", addr, e);
+                return Err(e.into());
+            }
+        };
 
         info!("Gateway listening on ws://{}", addr);
 
