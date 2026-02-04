@@ -336,9 +336,13 @@ tools:
         manager.initialize().await.unwrap();
 
         // Both skills have a tool named "test-tool"
-        // But tool registry uses tool name directly
+        // But tool registry uses tool name directly, so last one wins
+        // We have 2 skills but only 1 unique tool name
         let tools = manager.get_all_tools();
-        assert_eq!(tools.len(), 2); // Two tools with same name, last one wins
+        assert_eq!(tools.len(), 1); // Same tool name, only one registered
+
+        // But we should have 2 skills loaded
+        assert_eq!(manager.skill_count(), 2);
 
         manager.shutdown().await.unwrap();
     }

@@ -331,7 +331,9 @@ mod tests {
 
         let body = transformer.transform_request(&request).unwrap();
         assert_eq!(body["model"], "gpt-4");
-        assert_eq!(body["temperature"], 0.7);
+        // Use approximate comparison for floating point
+        let temp = body["temperature"].as_f64().unwrap();
+        assert!((temp - 0.7).abs() < 0.001, "temperature should be approximately 0.7, got {}", temp);
         assert!(body["messages"].as_array().unwrap().len() > 0);
     }
 

@@ -2,7 +2,7 @@
 mod tests {
     use super::*;
     use crate::agent::{Session, Message, Role};
-    use crate::tools::{ToolCall, FunctionCall, ToolResult, ToolSchema, FunctionSchema};
+    use crate::types::tool::{ToolCall, ToolResult, ToolDefinition};
 
     #[test]
     fn test_session_creation() {
@@ -14,7 +14,7 @@ mod tests {
     #[test]
     fn test_message_creation() {
         let msg = Message::user("Hello");
-        assert_eq!(msg.content, "Hello");
+        assert_eq!(msg.text(), Some("Hello"));
         assert!(matches!(msg.role, Role::User));
         assert!(!msg.id.is_empty());
     }
@@ -26,63 +26,43 @@ mod tests {
         session.add_message(msg);
         
         assert_eq!(session.messages.len(), 1);
-        assert_eq!(session.messages[0].content, "Test message");
+        assert_eq!(session.messages[0].text(), Some("Test message"));
     }
 
     #[test]
     fn test_tool_call_creation() {
-        let tool_call = ToolCall {
-            id: "call-1".to_string(),
-            tool_type: "function".to_string(),
-            function: FunctionCall {
-                name: "test_tool".to_string(),
-                arguments: r#"{"key": "value"}"#.to_string(),
-            },
-        };
+        let args = serde_json::json!({"key": "value"});
+        let tool_call = ToolCall::new("call-1", "test_tool", args);
         
         assert_eq!(tool_call.id, "call-1");
-        assert_eq!(tool_call.function.name, "test_tool");
+        assert_eq!(tool_call.name, "test_tool");
     }
 
     #[test]
     fn test_tool_result_creation() {
-        let result = ToolResult {
-            success: true,
-            result: "Success output".to_string(),
-            display_preference: Some("text".to_string()),
-        };
+        let result = ToolResult::success("Success output");
         
-        assert!(result.success);
-        assert_eq!(result.result, "Success output");
+        assert!(result.is_success());
+        assert_eq!(result.content, "Success output");
     }
 
     #[test]
-    fn test_tool_schema_creation() {
-        let schema = ToolSchema {
-            schema_type: "function".to_string(),
-            function: FunctionSchema {
-                name: "test".to_string(),
-                description: "Test tool".to_string(),
-                parameters: serde_json::json!({
-                    "type": "object",
-                    "properties": {}
-                }),
-            },
-        };
+    fn test_tool_definition_creation() {
+        let params = serde_json::json!({
+            "type": "object",
+            "properties": {}
+        });
+        let schema = ToolDefinition::new("test", "Test tool", params);
         
-        assert_eq!(schema.function.name, "test");
+        assert_eq!(schema.name, "test");
+        assert_eq!(schema.description, "Test tool");
     }
 
     #[test]
     fn test_assistant_message_with_tool_calls() {
-        let tool_calls = vec![ToolCall {
-            id: "call-1".to_string(),
-            tool_type: "function".to_string(),
-            function: FunctionCall {
-                name: "get_weather".to_string(),
-                arguments: r#"{"city": "Beijing"}"#.to_string(),
-            },
-        }];
+        let tool_calls = vec![
+            ToolCall::new("call-1", "get_weather", serde_json::json!({"city": "Beijing"}))
+        ];
         
         let msg = Message::assistant("", Some(tool_calls));
         assert!(msg.tool_calls.is_some());
@@ -94,6 +74,6 @@ mod tests {
         let msg = Message::tool_result("call-1", "Sunny, 25°C");
         assert!(matches!(msg.role, Role::Tool));
         assert_eq!(msg.tool_call_id, Some("call-1".to_string()));
-        assert_eq!(msg.content, "Sunny, 25°C");
+        assert_eq!(msg.text(), Some("Sunny, 25°C"));
     }
 }

@@ -1,9 +1,9 @@
 //! # Bamboo Session Storage
-//! 
+//!
 //! Bamboo AI Agent 的 Session 持久化存储系统。
-//! 
+//!
 //! ## 功能特性
-//! 
+//!
 //! - **会话元数据存储**：创建时间、最后活动、用户ID、状态等
 //! - **消息历史存储**：完整的对话历史
 //! - **事件流存储**：AgentEvent 的追加写入
@@ -11,9 +11,9 @@
 //! - **自动清理**：过期会话自动清理
 //! - **断线重连**：连接断开后 Session 保持，支持重连
 //! - **内存缓存**：活跃会话内存缓存，提高性能
-//! 
+//!
 //! ## 存储结构
-//! 
+//!
 //! ```
 //! <base_path>/
 //! ├── sessions/
@@ -23,13 +23,13 @@
 //! │   ├── <session_id>.jsonl     # 事件流（追加写入）
 //! │   └── ...
 //! └── index/
-//!     ├── by_user.json           # 用户索引（内存中）
-//!     ├── by_time.json           # 时间索引（内存中）
-//!     └── by_state.json          # 状态索引（内存中）
+//!     ├── by_user.json           # 用户索引(内存中)
+//!     ├── by_time.json           # 时间索引(内存中)
+//!     └── by_state.json          # 状态索引(内存中)
 //! ```
-//! 
+//!
 //! ## 使用示例
-//! 
+//!
 //! ```rust,no_run
 //! use bamboo_session::{
 //!     JsonlStorage, JsonlStorageConfig,
@@ -38,9 +38,9 @@
 //!     Message, AgentEvent,
 //! };
 //! use std::sync::Arc;
-//! 
+//!
 //! #[tokio::main]
-//! async fn main() -> anyhow::Result<()> {
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     // 创建存储
 //!     let storage_config = JsonlStorageConfig::new("~/.bamboo/sessions")
 //!         .with_default_ttl(86400); // 24小时过期
@@ -109,7 +109,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_and_load_session() {
         use tempfile::TempDir;
-        
+
         let temp_dir = TempDir::new().unwrap();
         let config = JsonlStorageConfig::new(temp_dir.path());
         let storage = JsonlStorage::new(config).await.unwrap();
@@ -117,13 +117,13 @@ mod tests {
         // 创建会话
         let session = Session::new("test-session-1")
             .with_user_id("user-123");
-        
+
         storage.create_session(&session).await.unwrap();
 
         // 加载会话
         let loaded = storage.load_session("test-session-1").await.unwrap();
         assert!(loaded.is_some());
-        
+
         let loaded = loaded.unwrap();
         assert_eq!(loaded.metadata.id, "test-session-1");
         assert_eq!(loaded.metadata.user_id, Some("user-123".to_string()));
@@ -132,7 +132,7 @@ mod tests {
     #[tokio::test]
     async fn test_session_filter() {
         use tempfile::TempDir;
-        
+
         let temp_dir = TempDir::new().unwrap();
         let config = JsonlStorageConfig::new(temp_dir.path());
         let storage = JsonlStorage::new(config).await.unwrap();
@@ -149,7 +149,7 @@ mod tests {
             .list_sessions(&SessionFilter::new().with_user_id("user-a"))
             .await
             .unwrap();
-        
+
         assert_eq!(result.total, 3); // session-0, 2, 4
     }
 }

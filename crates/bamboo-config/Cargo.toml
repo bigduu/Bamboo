@@ -18,6 +18,10 @@ tracing = "0.1"
 regex = "1"
 bamboo-masking = { path = "../bamboo-masking" }
 
+[dev-dependencies]
+tempfile = "3"
+toml = "0.8"
+
 [features]
 default = ["hot-reload"]
 hot-reload = ["notify"]

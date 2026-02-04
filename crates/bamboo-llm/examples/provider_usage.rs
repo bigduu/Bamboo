@@ -6,7 +6,8 @@
 //! - Device Code authentication (GitHub Copilot)
 
 use bamboo_llm::{OpenAiProvider, ProviderConfig, AuthConfig, LLMProvider};
-use bamboo_core::chat::{ChatRequest, ChatMessage, MessageRole};
+use bamboo_core::chat::{ChatRequest, ChatOptions};
+use bamboo_core::types::Message;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -89,34 +90,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // =========================================================================
     println!("\n=== Example 5: Creating a chat request ===");
     
-    let request = ChatRequest {
-        messages: vec![
-            ChatMessage {
-                role: MessageRole::System,
-                content: "You are a helpful assistant.".to_string(),
-                name: None,
-                tool_calls: None,
-                tool_call_id: None,
-            },
-            ChatMessage {
-                role: MessageRole::User,
-                content: "Hello, how are you?".to_string(),
-                name: None,
-                tool_calls: None,
-                tool_call_id: None,
-            },
-        ],
-        options: bamboo_core::chat::ChatOptions {
-            model: "gpt-4o-mini".to_string(),
-            temperature: Some(0.7),
-            max_tokens: Some(1000),
-            stream: false,
-            tools: None,
-            tool_choice: None,
-        },
-    };
+    let request = ChatRequest::new("gpt-4o-mini")
+        .with_message(Message::system("You are a helpful assistant."))
+        .with_message(Message::user("Hello, how are you?"))
+        .temperature(0.7)
+        .max_tokens(1000);
     
     println!("Chat request created with {} messages", request.messages.len());
+    println!("Model: {}", request.model);
+    println!("Temperature: {:?}", request.options.temperature);
     
     // Example of making a request (commented out as it requires valid auth)
     // let response = openai.chat(request).await?;

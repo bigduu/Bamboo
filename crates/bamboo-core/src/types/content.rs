@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Content type for messages
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Content {
     /// Simple text content
@@ -11,7 +11,7 @@ pub enum Content {
 }
 
 /// Individual content part (for multimodal messages)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ContentPart {
     /// Text content
@@ -21,7 +21,7 @@ pub enum ContentPart {
 }
 
 /// Image source for vision models
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum ImageSource {
     /// Base64 encoded image data

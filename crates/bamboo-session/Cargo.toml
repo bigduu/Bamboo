@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 description = "Bamboo AI Agent Session 持久化存储系统"
 
+[lib]
+doctest = false
+
 [dependencies]
 bamboo-core = { path = "../bamboo-core" }
 tokio = { version = "1", features = ["full"] }

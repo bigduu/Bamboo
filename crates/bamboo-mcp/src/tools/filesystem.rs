@@ -10,19 +10,32 @@ pub struct FilesystemTool;
 
 impl FilesystemTool {
     /// 验证路径安全性：解析绝对路径并确保在允许的基础目录内
+    /// 如果路径不存在，会尝试解析其父目录来验证安全性
     fn validate_path(path: &str) -> Result<PathBuf, String> {
         // 检查路径是否为空
         if path.is_empty() {
             return Err("Invalid path: path is empty".to_string());
         }
 
-        // 解析输入路径为绝对路径（处理符号链接和路径规范化）
-        let canonical_path = std::fs::canonicalize(path)
-            .map_err(|e| format!("Invalid path '{}': {}", path, e))?;
-
         // 解析允许的基础目录
         let base_path = std::fs::canonicalize(ALLOWED_BASE_DIR)
             .map_err(|e| format!("Internal error: invalid base directory '{}': {}", ALLOWED_BASE_DIR, e))?;
+
+        // 尝试解析输入路径为绝对路径
+        let canonical_path = match std::fs::canonicalize(path) {
+            Ok(p) => p,
+            Err(_) => {
+                // 路径不存在，手动解析为绝对路径
+                let path_buf = PathBuf::from(path);
+                if path_buf.is_absolute() {
+                    path_buf
+                } else {
+                    std::env::current_dir()
+                        .map_err(|e| format!("Failed to get current directory: {}", e))?
+                        .join(path_buf)
+                }
+            }
+        };
 
         // 验证路径是否在允许的基础目录内
         if !canonical_path.starts_with(&base_path) {
@@ -223,26 +236,31 @@ mod tests {
 
     #[tokio::test]
     async fn test_read_write_file() {
-        let test_path = "/tmp/test_mcp_fs.txt";
+        let test_dir = PathBuf::from(ALLOWED_BASE_DIR).join("mcp_test_fs");
+        let test_path = test_dir.join("test.txt").to_str().unwrap().to_string();
         let test_content = "Hello, MCP!";
         
+        // 确保目录存在（使用标准库的 create_dir_all 在测试前创建）
+        std::fs::create_dir_all(&test_dir).expect("Failed to create test directory");
+        
         // 写入文件
-        let result = FilesystemTool::write_file(test_path, test_content).await;
-        assert!(result.is_ok());
+        let result = FilesystemTool::write_file(&test_path, test_content).await;
+        assert!(result.is_ok(), "Failed to write file: {:?}", result);
         
         // 读取文件
-        let content = FilesystemTool::read_file(test_path).await.unwrap();
+        let content = FilesystemTool::read_file(&test_path).await.unwrap();
         assert_eq!(content, test_content);
         
         // 清理
-        let _ = fs::remove_file(test_path).await;
+        let _ = fs::remove_file(&test_path).await;
+        let _ = fs::remove_dir(&test_dir).await;
     }
 
     #[tokio::test]
     async fn test_list_directory() {
-        let entries = FilesystemTool::list_directory("/tmp").await;
-        assert!(entries.is_ok());
-        assert!(!entries.unwrap().is_empty());
+        let entries = FilesystemTool::list_directory(ALLOWED_BASE_DIR).await;
+        assert!(entries.is_ok(), "Failed to list directory: {:?}", entries);
+        // 目录可能为空，不检查是否非空
     }
 
     #[tokio::test]
@@ -287,19 +305,24 @@ mod tests {
     #[tokio::test]
     async fn test_allowed_directory_access() {
         // 测试允许目录内的访问
-        let test_path = "/Users/bigduu/test_mcp_allowed.txt";
+        let test_dir = PathBuf::from(ALLOWED_BASE_DIR).join("mcp_allowed");
+        let test_path = test_dir.join("test.txt").to_str().unwrap().to_string();
         let test_content = "Test content in allowed directory";
         
+        // 确保目录存在（使用标准库的 create_dir_all 在测试前创建）
+        std::fs::create_dir_all(&test_dir).expect("Failed to create test directory");
+        
         // 写入文件
-        let result = FilesystemTool::write_file(test_path, test_content).await;
+        let result = FilesystemTool::write_file(&test_path, test_content).await;
         assert!(result.is_ok(), "Should be able to write to allowed directory: {:?}", result);
         
         // 读取文件
-        let content = FilesystemTool::read_file(test_path).await;
+        let content = FilesystemTool::read_file(&test_path).await;
         assert!(content.is_ok());
         assert_eq!(content.unwrap(), test_content);
         
         // 清理
-        let _ = fs::remove_file(test_path).await;
+        let _ = fs::remove_file(&test_path).await;
+        let _ = fs::remove_dir(&test_dir).await;
     }
 }

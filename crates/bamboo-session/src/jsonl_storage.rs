@@ -9,7 +9,7 @@
 //! │   ├── <session_id>.json      # 会话元数据和消息
 //! │   └── ...
 //! ├── events/
-//! │   ├── <session_id>.jsonl     # 事件流（追加写入）
+//! │   ├── <session_id>.jsonl     # 事件流(追加写入)
 //! │   └── ...
 //! └── index/
 //!     ├── by_user.json           # 用户索引
@@ -40,9 +40,9 @@ use crate::types::{
 pub struct JsonlStorageConfig {
     /// 存储根目录
     pub base_path: PathBuf,
-    /// 自动清理间隔（秒），None 表示不自动清理
+    /// 自动清理间隔(秒)，None 表示不自动清理
     pub cleanup_interval_secs: Option<u64>,
-    /// 默认会话过期时间（秒），None 表示永不过期
+    /// 默认会话过期时间(秒)，None 表示永不过期
     pub default_ttl_secs: Option<u64>,
     /// 最大会话数限制
     pub max_sessions: Option<u64>,
