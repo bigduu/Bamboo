@@ -4,6 +4,7 @@ use clap::Parser;
 use bamboo_config::ConfigManager;
 
 mod handlers;
+mod middleware;
 mod server;
 mod state;
 mod agent_runner;
@@ -11,6 +12,7 @@ mod logging;
 mod skill_loader;
 mod event_bus;
 mod websocket;
+mod storage;
 
 use server::run_server;
 use logging::init_logging;
@@ -204,12 +206,5 @@ async fn main() -> io::Result<()> {
     
     // 启动 HTTP Server
     log::info!("Starting HTTP Server on {}:{}", config.server.host, port);
-    run_server(
-        config_manager,
-        port,
-        &provider,
-        llm_base_url,
-        model,
-        api_key,
-    ).await
+    run_server(state, port).await
 }

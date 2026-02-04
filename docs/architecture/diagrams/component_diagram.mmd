@@ -1,0 +1,119 @@
+graph TB
+    %% 样式定义
+    classDef component fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    classDef interface fill:#fff8e1,stroke:#ff8f00,stroke-width:2px
+    classDef data fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef external fill:#ffebee,stroke:#c62828,stroke-width:2px
+
+    %% HTTP Server 组件
+    subgraph HTTPServer["📡 HTTP Server 组件"]
+        Router["Router\n路由分发"]
+        ChatHandler["ChatHandler\n处理聊天请求"]
+        StreamHandler["StreamHandler\nSSE流式响应"]
+        HistoryHandler["HistoryHandler\n历史记录查询"]
+        ConfigHandler["ConfigHandler\n配置查询"]
+        HealthHandler["HealthHandler\n健康检查"]
+        StopHandler["StopHandler\n停止生成"]
+    end
+
+    %% Gateway 组件
+    subgraph GatewayComp["🌐 Gateway 组件"]
+        WSServer["WebSocket Server\n监听连接"]
+        ConnectionPool["ConnectionPool\n连接池管理"]
+        SessionManager["SessionManager\n会话管理"]
+        MessageRouter["MessageRouter\n消息路由"]
+        ProtocolHandler["ProtocolHandler\n协议处理"]
+    end
+
+    %% Agent Runner 组件
+    subgraph AgentComp["🤖 Agent Runner 组件"]
+        EventConsumer["EventConsumer\n事件消费者"]
+        ContextBuilder["ContextBuilder\n上下文构建"]
+        LLMCaller["LLMCaller\nLLM调用器"]
+        ToolExecutor["ToolExecutor\n工具执行器"]
+        ResponseFormatter["ResponseFormatter\n响应格式化"]
+    end
+
+    %% LLM Provider 组件
+    subgraph LLMComp["🧠 LLM Provider 组件"]
+        ProviderTrait["LLMProvider Trait\nProvider接口"]
+        OpenAIProvider["OpenAIProvider\nOpenAI兼容"]
+        CopilotProvider["CopilotProvider\nGitHub Copilot"]
+        ForwardProvider["ForwardProvider\n转发Provider"]
+        AuthManager["AuthManager\n认证管理"]
+        SchemaTransformer["SchemaTransformer\nSchema转换"]
+    end
+
+    %% Storage 组件
+    subgraph StorageComp["💾 Storage 组件"]
+        StorageTrait["Storage Trait\n存储接口"]
+        JsonlImpl["JsonlStorage\nJSONL实现"]
+        SessionStore["SessionStore\n会话存储"]
+        EventStore["EventStore\n事件存储"]
+        IndexManager["IndexManager\n索引管理"]
+    end
+
+    %% Skill System 组件
+    subgraph SkillComp["🎯 Skill System 组件"]
+        SkillManager["SkillManager\nSkill管理"]
+        SkillParser["SkillParser\nSKILL.md解析"]
+        SkillWatcher["SkillWatcher\n文件监听"]
+        ToolRegistry["ToolRegistry\n工具注册表"]
+        HotReloader["HotReloader\n热重载"]
+    end
+
+    %% 数据流
+    Router -->|/chat| ChatHandler
+    Router -->|/stream| StreamHandler
+    Router -->|/history| HistoryHandler
+    Router -->|/config| ConfigHandler
+    Router -->|/health| HealthHandler
+    Router -->|/stop| StopHandler
+
+    ChatHandler -->|创建会话| SessionManager
+    StreamHandler -->|订阅事件| EventConsumer
+    
+    WSServer -->|接受连接| ConnectionPool
+    ConnectionPool -->|管理| SessionManager
+    SessionManager -->|路由| MessageRouter
+    MessageRouter -->|处理| ProtocolHandler
+    ProtocolHandler -->|发布| EventConsumer
+
+    EventConsumer -->|构建| ContextBuilder
+    ContextBuilder -->|调用| LLMCaller
+    LLMCaller -->|使用| ProviderTrait
+    ProviderTrait -->|OpenAI| OpenAIProvider
+    ProviderTrait -->|Copilot| CopilotProvider
+    ProviderTrait -->|Forward| ForwardProvider
+    
+    LLMCaller -->|需要工具| ToolExecutor
+    ToolExecutor -->|查询| ToolRegistry
+    ToolRegistry -->|加载| SkillManager
+    SkillManager -->|解析| SkillParser
+    SkillManager -->|监听| SkillWatcher
+    SkillWatcher -->|热重载| HotReloader
+
+    LLMCaller -->|认证| AuthManager
+    AuthManager -->|转换| SchemaTransformer
+
+    SessionManager -->|存储| StorageTrait
+    StorageTrait -->|实现| JsonlImpl
+    JsonlImpl -->|会话| SessionStore
+    JsonlImpl -->|事件| EventStore
+    JsonlImpl -->|索引| IndexManager
+
+    ResponseFormatter -->|SSE| StreamHandler
+    ResponseFormatter -->|WebSocket| ProtocolHandler
+
+    %% 外部接口
+    OpenAIProvider -->|HTTP| ExternalOpenAI["OpenAI API"]
+    CopilotProvider -->|HTTP| ExternalCopilot["GitHub Copilot"]
+
+    %% 样式应用
+    class Router,ChatHandler,StreamHandler,HistoryHandler,ConfigHandler,HealthHandler,StopHandler component
+    class WSServer,ConnectionPool,SessionManager,MessageRouter,ProtocolHandler component
+    class EventConsumer,ContextBuilder,LLMCaller,ToolExecutor,ResponseFormatter component
+    class ProviderTrait,OpenAIProvider,CopilotProvider,ForwardProvider,AuthManager,SchemaTransformer component
+    class StorageTrait,JsonlImpl,SessionStore,EventStore,IndexManager component
+    class SkillManager,SkillParser,SkillWatcher,ToolRegistry,HotReloader component
+    class ExternalOpenAI,ExternalCopilot external

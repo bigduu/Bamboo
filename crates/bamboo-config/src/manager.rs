@@ -1,5 +1,6 @@
 use crate::config::{Config, ConfigError, ConfigResult};
 use regex::Regex;
+use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -139,11 +140,11 @@ impl ConfigManager {
     /// 验证配置
     pub fn validate(config: &Config) -> ConfigResult<()> {
         // 验证服务器端口
-        if config.server.port == 0 {
-            return Err(ConfigError::Validation(
-                "Server port cannot be 0".to_string(),
-            ));
-        }
+        validate_port(config.server.port, "Server port")?;
+        validate_host(&config.server.host)?;
+
+        // 验证 gateway bind
+        validate_bind_addr(&config.gateway.bind)?;
 
         // 验证 agent 配置
         if config.agent.max_rounds == 0 {
@@ -164,6 +165,17 @@ impl ConfigManager {
                 "Default LLM provider '{}' not found in providers list",
                 config.llm.default_provider
             )));
+        }
+
+        // 验证路径
+        if let Some(ref path) = config.storage.path {
+            validate_path("Storage path", path)?;
+        }
+        if let Some(ref path) = config.logging.file {
+            validate_path("Logging file path", path)?;
+        }
+        for dir in &config.skills.directories {
+            validate_path("Skills directory", dir)?;
         }
 
         Ok(())
@@ -207,6 +219,90 @@ impl ConfigManager {
     pub fn path(&self) -> &Path {
         &self.path
     }
+}
+
+fn validate_port(port: u16, label: &str) -> ConfigResult<()> {
+    if port == 0 {
+        return Err(ConfigError::Validation(format!(
+            "{} must be between 1 and 65535",
+            label
+        )));
+    }
+    Ok(())
+}
+
+fn validate_host(host: &str) -> ConfigResult<()> {
+    if host.is_empty() {
+        return Err(ConfigError::Validation("Host cannot be empty".to_string()));
+    }
+
+    if host.eq_ignore_ascii_case("localhost") {
+        return Ok(());
+    }
+
+    if host.parse::<IpAddr>().is_ok() {
+        return Ok(());
+    }
+
+    // Basic hostname validation (RFC 1123)
+    let hostname_re = Regex::new(
+        r"^(?=.{1,253}$)([a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)(\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$",
+    )
+    .unwrap();
+
+    if hostname_re.is_match(host) {
+        Ok(())
+    } else {
+        Err(ConfigError::Validation(format!(
+            "Invalid host format: {}",
+            host
+        )))
+    }
+}
+
+fn validate_bind_addr(bind: &str) -> ConfigResult<()> {
+    if bind.trim().is_empty() {
+        return Err(ConfigError::Validation(
+            "Gateway bind address cannot be empty".to_string(),
+        ));
+    }
+
+    if let Ok(addr) = bind.parse::<SocketAddr>() {
+        validate_port(addr.port(), "Gateway bind port")?;
+        return Ok(());
+    }
+
+    let (host, port_str) = bind
+        .rsplit_once(':')
+        .ok_or_else(|| ConfigError::Validation(format!("Invalid bind address: {}", bind)))?;
+    if host.is_empty() {
+        return Err(ConfigError::Validation(format!("Invalid bind host: {}", bind)));
+    }
+    let port: u16 = port_str.parse().map_err(|_| {
+        ConfigError::Validation(format!("Invalid bind port: {}", bind))
+    })?;
+    validate_port(port, "Gateway bind port")?;
+    validate_host(host)?;
+    Ok(())
+}
+
+fn validate_path(label: &str, path: &str) -> ConfigResult<()> {
+    if path.trim().is_empty() {
+        return Err(ConfigError::Validation(format!("{} cannot be empty", label)));
+    }
+    if path.contains('\0') {
+        return Err(ConfigError::Validation(format!(
+            "{} contains invalid characters",
+            label
+        )));
+    }
+
+    let expanded = crate::expand_tilde(path)
+        .unwrap_or_else(|| std::path::PathBuf::from(path));
+    if expanded.as_os_str().is_empty() {
+        return Err(ConfigError::Validation(format!("{} is invalid", label)));
+    }
+    Ok(())
 }
 
 #[cfg(feature = "hot-reload")]

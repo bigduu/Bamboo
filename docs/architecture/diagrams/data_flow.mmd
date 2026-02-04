@@ -1,0 +1,96 @@
+sequenceDiagram
+    autonumber
+    participant Client as 客户端
+    participant Server as bamboo-server
+    participant Gateway as Gateway
+    participant EventBus as EventBus
+    participant Agent as AgentRunner
+    participant LLM as LLM Provider
+    participant Tool as Tool Executor
+    participant Storage as Storage
+
+    %% HTTP 请求流程
+    rect rgb(230, 245, 255)
+        Note over Client,Storage: HTTP 请求流程
+        Client->>+Server: POST /api/v1/chat {message}
+        Server->>Storage: 创建/加载 Session
+        Storage-->>Server: Session 对象
+        Server->>EventBus: 发布 ChatRequest 事件
+        Server-->>Client: 返回 {session_id, stream_url}
+        
+        Client->>+Server: GET /api/v1/stream/{session_id}
+        Server->>EventBus: 订阅事件
+    end
+
+    %% WebSocket 请求流程
+    rect rgb(255, 245, 230)
+        Note over Client,Storage: WebSocket 请求流程
+        Client->>+Gateway: WebSocket 连接
+        Gateway->>Gateway: 创建 Connection
+        Gateway-->>Client: 连接成功
+        
+        Client->>Gateway: 发送 Chat 消息
+        Gateway->>EventBus: 发布 ChatRequest 事件
+    end
+
+    %% Agent 处理流程
+    rect rgb(240, 255, 240)
+        Note over EventBus,Storage: Agent 处理流程
+        EventBus->>+Agent: 消费 ChatRequest
+        Agent->>Storage: 获取历史消息
+        Storage-->>Agent: 消息列表
+        
+        Agent->>Agent: 构建上下文
+        Agent->>+LLM: 发送 ChatRequest
+        
+        alt 需要工具调用
+            LLM-->>Agent: 返回 ToolCall
+            Agent->>+Tool: 执行工具
+            Tool->>Tool: 执行命令/脚本
+            Tool-->>-Agent: 返回 ToolResult
+            Agent->>LLM: 发送工具结果
+            LLM-->>Agent: 返回最终响应
+        else 直接响应
+            LLM-->>-Agent: 返回 ChatResponse
+        end
+        
+        Agent->>Storage: 保存 Assistant 消息
+        Agent->>EventBus: 发布 ChatResponse 事件
+        Agent->>EventBus: 发布 AgentComplete 事件
+    end
+
+    %% 响应流程
+    rect rgb(255, 240, 245)
+        Note over Client,Storage: 响应流程
+        
+        par HTTP 响应
+            EventBus->>Server: ChatResponse (SSE)
+            Server->>Client: data: {token}
+            EventBus->>Server: AgentComplete
+            Server->>Client: data: [DONE]
+            Server-->>-Client: 关闭连接
+        and WebSocket 响应
+            EventBus->>Gateway: ChatResponse
+            Gateway->>Client: WebSocket 消息
+            EventBus->>Gateway: AgentComplete
+            Gateway->>Client: 完成消息
+        end
+    end
+
+    %% 工具调用详细流程
+    rect rgb(245, 245, 255)
+        Note over Agent,Storage: 工具调用详细流程
+        Agent->>Agent: 解析 ToolCall
+        Agent->>Tool: 调用 execute(tool_name, args)
+        
+        alt 文件系统工具
+            Tool->>Tool: read_file/write_file
+        else 命令工具
+            Tool->>Tool: execute_command
+        else Skill 工具
+            Tool->>Tool: 执行 Skill 脚本
+        end
+        
+        Tool-->>Agent: 返回结果
+        Agent->>EventBus: 发布 ToolComplete 事件
+    end

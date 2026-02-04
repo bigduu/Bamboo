@@ -10,9 +10,9 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc;
+use bamboo_masking::MaskingConfig;
 
-use crate::event_bus::{Event, EventBus};
+use crate::event_bus::{Event, EventBus, ReplyChannel, ChatChunk};
 use crate::storage::SessionStorage;
 
 /// LLM 请求消息
@@ -42,15 +42,6 @@ struct LlmResponse {
     choices: Vec<LlmChoice>,
 }
 
-/// 回复通道类型
-#[derive(Debug, Clone)]
-pub enum ReplyChannel {
-    /// WebSocket 连接（实时推送）
-    WebSocket(mpsc::Sender<ChatResponse>),
-    /// HTTP 请求（通过查询接口获取）
-    Http(String), // session_id
-}
-
 /// 聊天响应
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatResponse {
@@ -75,6 +66,7 @@ pub struct HttpResponse {
 pub struct AgentRunnerState {
     pub event_bus: Arc<EventBus>,
     pub storage: Arc<dyn SessionStorage>,
+    pub masking: Option<MaskingConfig>,
 }
 
 impl AgentRunnerState {
@@ -82,16 +74,50 @@ impl AgentRunnerState {
         Self {
             event_bus,
             storage,
+            masking: None,
+        }
+    }
+
+    pub fn with_masking(
+        event_bus: Arc<EventBus>,
+        storage: Arc<dyn SessionStorage>,
+        masking: MaskingConfig,
+    ) -> Self {
+        Self {
+            event_bus,
+            storage,
+            masking: Some(masking),
         }
     }
 }
 
 /// Agent 运行器
-pub struct AgentRunner;
+pub struct AgentRunner {
+    state: Arc<crate::state::AppState>,
+}
 
 impl AgentRunner {
+    /// 创建新的 AgentRunner
+    pub fn new(state: Arc<crate::state::AppState>) -> Self {
+        Self { state }
+    }
+
+    /// 运行 AgentRunner（处理事件循环）
+    pub async fn run(&self) {
+        tracing::info!("AgentRunner started");
+        // TODO: 实现事件循环处理
+        // 暂时保持运行状态
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+        }
+    }
     /// 调用 LLM API 获取响应
-    async fn call_llm(message: &str) -> Result<String> {
+    async fn call_llm(
+        storage: &dyn SessionStorage,
+        session_id: &str,
+        message: &str,
+        masking: Option<MaskingConfig>,
+    ) -> Result<String> {
         let api_url = std::env::var("LLM_API_URL")
             .unwrap_or_else(|_| "http://localhost:12123".to_string());
         let api_key = std::env::var("LLM_API_KEY")
@@ -101,14 +127,39 @@ impl AgentRunner {
 
         let client = reqwest::Client::new();
         
+        let mut history = storage.get_messages(session_id).await?;
+        if history.len() > 10 {
+            history = history.split_off(history.len() - 10);
+        }
+
+        let mut messages: Vec<LlmMessage> = history
+            .into_iter()
+            .map(|msg| {
+                let content = match &masking {
+                    Some(config) => config.apply_to_text(&msg.content),
+                    None => msg.content,
+                };
+                LlmMessage {
+                    role: msg.role,
+                    content,
+                }
+            })
+            .collect();
+
+        if messages.is_empty() {
+            let content = match &masking {
+                Some(config) => config.apply_to_text(message),
+                None => message.to_string(),
+            };
+            messages.push(LlmMessage {
+                role: "user".to_string(),
+                content,
+            });
+        }
+
         let request_body = LlmRequest {
             model,
-            messages: vec![
-                LlmMessage {
-                    role: "user".to_string(),
-                    content: message.to_string(),
-                }
-            ],
+            messages,
             stream: false,
         };
 
@@ -147,7 +198,7 @@ impl AgentRunner {
     /// 处理聊天消息并发送响应
     ///
     /// 根据 reply_to 类型决定行为：
-    /// - WebSocket: 发送 ChatResponse 事件（实时推送）
+    /// - Gateway: 发送 ChatResponse 事件（实时推送）
     /// - Http: 不发送事件，只保存到 session storage
     pub async fn handle_chat(
         state: &AgentRunnerState,
@@ -172,7 +223,15 @@ impl AgentRunner {
         let message_id = uuid::Uuid::new_v4().to_string();
         
         // 调用真实的 LLM API
-        let response_content = match Self::call_llm(message).await {
+        let masking = state.masking.clone();
+        let response_content = match Self::call_llm(
+            state.storage.as_ref(),
+            session_id,
+            message,
+            masking,
+        )
+        .await
+        {
             Ok(content) => content,
             Err(e) => {
                 tracing::error!("LLM API call failed: {}", e);
@@ -192,21 +251,14 @@ impl AgentRunner {
 
         // 根据回复通道类型处理
         match reply_to {
-            ReplyChannel::WebSocket(ws_sender) => {
-                // WebSocket 客户端: 发送 ChatResponse 事件（实时推送）
-                state
-                    .event_bus
-                    .publish(Event::ChatResponse {
-                        session_id: session_id.to_string(),
-                        message_id: message_id.clone(),
-                        content: response.content.clone(),
-                        role: response.role.clone(),
-                        timestamp: response.timestamp,
-                    })
-                    .await?;
-
-                // 同时发送到 WebSocket 通道
-                let _ = ws_sender.send(response.clone()).await;
+            ReplyChannel::Gateway(_) => {
+                // Gateway/WebSocket 客户端: 发送 ChatResponse 事件（实时推送）
+                if let Err(e) = state.event_bus.publish(Event::ChatResponse {
+                    session_id: session_id.to_string(),
+                    chunk: ChatChunk::Content { text: response.content.clone() },
+                }) {
+                    tracing::debug!("Event bus publish failed: {}", e);
+                }
                 
                 // 同时保存到存储（WebSocket 也需要持久化）
                 state
@@ -278,24 +330,18 @@ mod tests {
         });
 
         // 创建事件总线
-        let event_bus = Arc::new(EventBus::new());
+        let event_bus = Arc::new(EventBus::default());
 
         // 创建状态
         let state = AgentRunnerState::new(event_bus.clone(), storage.clone());
 
-        // 创建 WebSocket 通道
-        let (tx, mut rx) = mpsc::channel(10);
-        let reply_to = ReplyChannel::WebSocket(tx);
+        // Gateway 回复通道
+        let reply_to = ReplyChannel::Gateway("session-1".to_string());
 
         // 处理聊天
         let response = AgentRunner::handle_chat(&state, "session-1", "Hello", &reply_to)
             .await
             .unwrap();
-
-        // WebSocket 应该收到消息
-        let received = rx.recv().await;
-        assert!(received.is_some());
-        assert_eq!(received.unwrap().content, response.content);
 
         // 存储中应该有 2 条消息（用户消息 + assistant 响应）
         let messages = storage.get_messages("session-1").await.unwrap();
@@ -312,7 +358,7 @@ mod tests {
         });
 
         // 创建事件总线
-        let event_bus = Arc::new(EventBus::new());
+        let event_bus = Arc::new(EventBus::default());
 
         // 创建状态
         let state = AgentRunnerState::new(event_bus.clone(), storage.clone());

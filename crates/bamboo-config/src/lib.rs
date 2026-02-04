@@ -6,6 +6,9 @@ pub use config::{
     ProviderSettings, ServerConfig, SkillsConfig, StorageConfig, StorageType,
 };
 pub use manager::ConfigManager;
+pub use bamboo_masking::{
+    default_masking_path, MaskingConfig, MaskingConfigManager, MaskingRule, RuleType,
+};
 
 use std::path::PathBuf;
 
@@ -42,6 +45,9 @@ pub async fn init_bamboo_dirs() -> ConfigResult<()> {
         tokio::fs::create_dir_all(bamboo.join("sessions")).await?;
         tokio::fs::create_dir_all(bamboo.join("logs")).await?;
         tokio::fs::create_dir_all(bamboo.join("credentials")).await?;
+    }
+    if let Err(err) = MaskingConfigManager::load_default().await {
+        tracing::warn!("Failed to initialize masking config: {}", err);
     }
     Ok(())
 }

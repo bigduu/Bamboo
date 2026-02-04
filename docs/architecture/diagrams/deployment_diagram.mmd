@@ -1,0 +1,119 @@
+graph TB
+    %% 样式定义
+    classDef dev fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+    classDef prod fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
+    classDef external fill:#ffebee,stroke:#c62828,stroke-width:2px
+    classDef client fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+
+    %% 开发环境部署
+    subgraph DevEnv["🖥️ 开发环境"]
+        subgraph DevMachine["开发机器"]
+            DevCLI["bamboo-cli\n命令行工具"]
+            DevTUI["bamboo-tui\n终端UI"]
+            DevServer["bamboo-server\nHTTP服务:8081"]
+            DevGateway["Gateway\nWebSocket:18790"]
+            
+            subgraph DevInternal["内部组件"]
+                DevEventBus["EventBus"]
+                DevAgent["AgentRunner"]
+                DevLLM["LLM Provider"]
+                DevSkill["Skill Manager"]
+                DevTool["Tool Executor"]
+            end
+            
+            subgraph DevStorage["本地存储"]
+                DevConfig["~/.bamboo/\nconfig.json"]
+                DevSessions["~/.bamboo/\nsessions/"]
+                DevSkills["~/.bamboo/\nskills/"]
+                DevLogs["~/.bamboo/\nlogs/"]
+            end
+        end
+        
+        DevLocalLLM["本地LLM\nOllama/LM Studio\n:11434/:1234"]
+    end
+
+    %% 生产环境部署
+    subgraph ProdEnv["🌐 生产环境"]
+        subgraph LoadBalancer["负载均衡层"]
+            Nginx["Nginx/Traefik\n反向代理"]
+        end
+        
+        subgraph AppServers["应用服务器集群"]
+            Server1["bamboo-server-1\n:8081"]
+            Server2["bamboo-server-2\n:8081"]
+            ServerN["bamboo-server-N\n:8081"]
+        end
+        
+        subgraph SharedStorage["共享存储"]
+            Postgres[("PostgreSQL\n会话持久化")]
+            Redis[("Redis\n缓存/消息队列")]
+            ObjectStorage["对象存储\nSkill文件"]
+        end
+        
+        subgraph ExternalServices["外部服务"]
+            OpenAI["OpenAI API"]
+            Copilot["GitHub Copilot"]
+            CustomLLM["自定义LLM服务"]
+        end
+    end
+
+    %% 客户端
+    subgraph Clients["👥 客户端"]
+        Browser["Web浏览器"]
+        DesktopCLI["桌面CLI"]
+        Mobile["移动端"]
+        VSCode["VSCode扩展"]
+    end
+
+    %% 开发环境连接
+    DevCLI -->|HTTP| DevServer
+    DevTUI -->|HTTP| DevServer
+    DevServer -->|内部| DevEventBus
+    DevServer -->|WebSocket| DevGateway
+    DevGateway -->|内部| DevEventBus
+    DevEventBus -->|消费| DevAgent
+    DevAgent -->|调用| DevLLM
+    DevAgent -->|执行| DevTool
+    DevSkill -->|加载| DevTool
+    
+    DevServer -->|读取| DevConfig
+    DevServer -->|存储| DevSessions
+    DevSkill -->|扫描| DevSkills
+    DevServer -->|写入| DevLogs
+    
+    DevLLM -->|本地API| DevLocalLLM
+
+    %% 生产环境连接
+    Browser -->|HTTPS| Nginx
+    DesktopCLI -->|HTTPS| Nginx
+    Mobile -->|HTTPS| Nginx
+    VSCode -->|WSS| Nginx
+    
+    Nginx -->|负载均衡| Server1
+    Nginx -->|负载均衡| Server2
+    Nginx -->|负载均衡| ServerN
+    
+    Server1 -->|读写| Postgres
+    Server2 -->|读写| Postgres
+    ServerN -->|读写| Postgres
+    
+    Server1 -->|缓存| Redis
+    Server2 -->|缓存| Redis
+    ServerN -->|缓存| Redis
+    
+    Server1 -->|加载| ObjectStorage
+    Server2 -->|加载| ObjectStorage
+    ServerN -->|加载| ObjectStorage
+    
+    Server1 -->|API| OpenAI
+    Server2 -->|API| Copilot
+    ServerN -->|API| CustomLLM
+
+    %% 样式应用
+    class DevCLI,DevTUI,DevServer,DevGateway,DevEventBus,DevAgent,DevLLM,DevSkill,DevTool dev
+    class DevConfig,DevSessions,DevSkills,DevLogs dev
+    class DevLocalLLM external
+    class Nginx,Server1,Server2,ServerN prod
+    class Postgres,Redis,ObjectStorage prod
+    class OpenAI,Copilot,CustomLLM external
+    class Browser,DesktopCLI,Mobile,VSCode client

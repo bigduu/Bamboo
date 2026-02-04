@@ -1,0 +1,92 @@
+graph TB
+    %% 样式定义
+    classDef client fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    classDef service fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef core fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef capability fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+    classDef external fill:#ffebee,stroke:#b71c1c,stroke-width:2px
+    classDef storage fill:#fffde7,stroke:#f57f17,stroke-width:2px
+
+    %% 客户端层
+    subgraph Client["🖥️ 客户端层"]
+        CLI["bamboo-cli\n命令行客户端"]
+        TUI["bamboo-tui\n终端UI客户端"]
+        Web["Web客户端\n(浏览器/扩展)"]
+    end
+
+    %% 服务层
+    subgraph Service["⚙️ 服务层"]
+        Server["bamboo-server\nHTTP/WebSocket服务"]
+        Gateway["Gateway\nWebSocket网关"]
+        AgentRunner["AgentRunner\nAgent执行器"]
+        EventBus["EventBus\n事件总线"]
+        Handlers["HTTP Handlers\nREST API端点"]
+    end
+
+    %% 核心层
+    subgraph Core["🔧 核心层"]
+        BambooCore["bamboo-core\n核心类型与Agent循环"]
+        Session["bamboo-session\n会话存储管理"]
+        Config["bamboo-config\n配置管理"]
+    end
+
+    %% 能力层
+    subgraph Capability["🛠️ 能力层"]
+        LLM["bamboo-llm\nLLM Provider"]
+        Skill["bamboo-skill\nSkill管理"]
+        Tool["bamboo-tool\n工具执行"]
+        MCP["bamboo-mcp\nMCP客户端"]
+    end
+
+    %% 外部服务
+    subgraph External["🌐 外部服务"]
+        OpenAI["OpenAI API"]
+        Copilot["GitHub Copilot"]
+        LocalLLM["本地LLM\n(Ollama等)"]
+    end
+
+    %% 存储层
+    subgraph Storage["💾 存储层"]
+        JsonlStorage["JsonlStorage\nJSONL文件存储"]
+        ConfigFile["config.json\n配置文件"]
+        SessionData["Session数据\n(~/.bamboo/sessions)"]
+        SkillDir["Skill目录\n(~/.bamboo/skills)"]
+    end
+
+    %% 连接关系
+    CLI -->|HTTP POST /api/v1/chat| Handlers
+    TUI -->|HTTP SSE /api/v1/stream| Handlers
+    Web -->|WebSocket ws://| Gateway
+
+    Handlers -->|使用| Server
+    Server -->|发布事件| EventBus
+    Gateway -->|消息转发| EventBus
+    EventBus -->|消费| AgentRunner
+
+    Server -->|管理| BambooCore
+    Server -->|读取| Config
+    AgentRunner -->|调用| LLM
+    AgentRunner -->|执行| Tool
+
+    Skill -->|定义| Tool
+    MCP -->|实现| Tool
+    Tool -->|接口| BambooCore
+
+    LLM -->|OpenAI API| OpenAI
+    LLM -->|Copilot API| Copilot
+    LLM -->|Local API| LocalLLM
+
+    BambooCore -->|存储| Session
+    Session -->|JsonlStorage| JsonlStorage
+    SessionData -->|加载| Session
+
+    Config -->|加载| ConfigFile
+    Skill -->|扫描| SkillDir
+
+    %% 样式应用
+    class CLI,TUI,Web client
+    class Server,Gateway,AgentRunner,EventBus,Handlers service
+    class BambooCore,Session,Config core
+    class LLM,Skill,Tool,MCP capability
+    class OpenAI,Copilot,LocalLLM external
+    class JsonlStorage,ConfigFile,SessionData,SkillDir storage

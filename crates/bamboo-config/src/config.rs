@@ -38,6 +38,7 @@ impl Config {
             ["server", "port"] => Some(self.server.port.to_string()),
             ["server", "host"] => Some(self.server.host.clone()),
             ["server", "cors"] => Some(self.server.cors.to_string()),
+            ["server", "admin_token"] => self.server.admin_token.clone(),
             ["gateway", "enabled"] => Some(self.gateway.enabled.to_string()),
             ["gateway", "bind"] => Some(self.gateway.bind.clone()),
             ["gateway", "auth_token"] => self.gateway.auth_token.clone(),
@@ -72,6 +73,13 @@ impl Config {
                 self.server.cors = value.parse().map_err(|_| {
                     ConfigError::Validation(format!("Invalid boolean: {}", value))
                 })?;
+            }
+            ["server", "admin_token"] => {
+                if value.trim().is_empty() {
+                    self.server.admin_token = None;
+                } else {
+                    self.server.admin_token = Some(value.to_string());
+                }
             }
             ["gateway", "enabled"] => {
                 self.gateway.enabled = value.parse().map_err(|_| {
@@ -135,6 +143,8 @@ pub struct ServerConfig {
     pub port: u16,
     pub host: String,
     pub cors: bool,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub admin_token: Option<String>,
 }
 
 impl Default for ServerConfig {
@@ -143,6 +153,7 @@ impl Default for ServerConfig {
             port: 8081,
             host: "127.0.0.1".to_string(),
             cors: true,
+            admin_token: None,
         }
     }
 }
@@ -218,6 +229,23 @@ impl Default for LlmConfig {
                     env: "OPENAI_API_KEY".to_string(),
                 },
                 headers: None,
+                timeout_seconds: Some(60),
+            },
+        );
+        
+        // Default Anthropic provider with API key auth
+        providers.insert(
+            "anthropic".to_string(),
+            ProviderSettings {
+                enabled: false,
+                base_url: "https://api.anthropic.com/v1".to_string(),
+                model: Some("claude-3-sonnet-20240229".to_string()),
+                auth: AuthSettings::ApiKey {
+                    env: "ANTHROPIC_API_KEY".to_string(),
+                },
+                headers: Some(HashMap::from([
+                    ("anthropic-version".to_string(), "2023-06-01".to_string()),
+                ])),
                 timeout_seconds: Some(60),
             },
         );

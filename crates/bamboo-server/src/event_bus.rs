@@ -62,6 +62,10 @@ pub enum Event {
         tool_call_id: String,
         error: String,
     },
+    /// 配置更新
+    ConfigUpdated {
+        sections: Vec<String>,
+    },
 }
 
 /// 回复通道 - 决定响应发送到何处

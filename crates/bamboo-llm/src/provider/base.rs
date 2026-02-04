@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use bamboo_core::chat::{ChatRequest, ChatResponse};
 use futures::{StreamExt, TryStreamExt};
 use reqwest::{Client, header};
+use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -14,7 +15,7 @@ use crate::auth::{Authenticator, ApiKeyAuth, BearerAuth, DeviceCodeAuth};
 /// Handles common HTTP functionality and delegates schema transformation
 pub struct BaseProvider<T: SchemaTransformer> {
     config: ProviderConfig,
-    http_client: Client,
+    http_client: reqwest_middleware::ClientWithMiddleware,
     transformer: Arc<T>,
     pub metadata: ProviderMetadata,
     authenticator: Arc<dyn Authenticator>,
@@ -27,10 +28,20 @@ impl<T: SchemaTransformer + 'static> BaseProvider<T> {
         transformer: T,
         metadata: ProviderMetadata,
     ) -> Result<Self> {
-        let http_client = Client::builder()
-            .timeout(config.timeout)
-            .build()
-            .map_err(|e| LLMError::Config(e.to_string()))?;
+        // Create retry policy with exponential backoff
+        let retry_policy = ExponentialBackoff::builder()
+            .base(2)
+            .build_with_max_retries(3);
+        
+        // Create client with retry middleware
+        let http_client = reqwest_middleware::ClientBuilder::new(
+            Client::builder()
+                .timeout(config.timeout)
+                .build()
+                .map_err(|e| LLMError::Config(e.to_string()))?
+        )
+        .with(RetryTransientMiddleware::new_with_policy(retry_policy))
+        .build();
         
         // Create authenticator based on auth config
         let authenticator: Arc<dyn Authenticator> = match &config.auth {
@@ -60,10 +71,19 @@ impl<T: SchemaTransformer + 'static> BaseProvider<T> {
         metadata: ProviderMetadata,
         authenticator: Arc<dyn Authenticator>,
     ) -> Result<Self> {
-        let http_client = Client::builder()
-            .timeout(config.timeout)
-            .build()
-            .map_err(|e| LLMError::Config(e.to_string()))?;
+        // Create retry policy with exponential backoff
+        let retry_policy = ExponentialBackoff::builder()
+            .base(2)
+            .build_with_max_retries(3);
+        
+        let http_client = reqwest_middleware::ClientBuilder::new(
+            Client::builder()
+                .timeout(config.timeout)
+                .build()
+                .map_err(|e| LLMError::Config(e.to_string()))?
+        )
+        .with(RetryTransientMiddleware::new_with_policy(retry_policy))
+        .build();
 
         Ok(Self {
             config,
@@ -76,10 +96,19 @@ impl<T: SchemaTransformer + 'static> BaseProvider<T> {
 
     /// Create HTTP client with custom timeout
     pub fn with_timeout(mut self, timeout: Duration) -> Result<Self> {
-        self.http_client = Client::builder()
-            .timeout(timeout)
-            .build()
-            .map_err(|e| LLMError::Config(e.to_string()))?;
+        // Create retry policy with exponential backoff
+        let retry_policy = ExponentialBackoff::builder()
+            .base(2)
+            .build_with_max_retries(3);
+        
+        self.http_client = reqwest_middleware::ClientBuilder::new(
+            Client::builder()
+                .timeout(timeout)
+                .build()
+                .map_err(|e| LLMError::Config(e.to_string()))?
+        )
+        .with(RetryTransientMiddleware::new_with_policy(retry_policy))
+        .build();
         Ok(self)
     }
 

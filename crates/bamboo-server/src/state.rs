@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
-use bamboo_config::{ConfigManager, AuthSettings};
+use bamboo_config::{ConfigManager, AuthSettings, MaskingConfigManager};
 use bamboo_core::{Session, AgentEvent, storage::JsonlStorage};
 use bamboo_core::tools::{ToolExecutor, ToolCall, ToolResult, ToolSchema, FunctionSchema};
 use bamboo_core::tools::executor::{ToolError, Result as ToolResultResult};
@@ -11,6 +11,8 @@ use bamboo_skill::SkillManager;
 use bamboo_tool::types::{ToolDef, ArgType};
 use bamboo_tool::executor::{ToolRunner, ToolExecutor as BambooToolExecutor};
 use async_trait::async_trait;
+use bamboo_prompt::{PromptManager, PromptStorage};
+use bamboo_memory::MemoryManager;
 
 use crate::event_bus::{EventBus, Event, ReplyChannel, ChatChunk};
 use crate::websocket::{Gateway, GatewayConfig};
@@ -117,6 +119,9 @@ pub struct AppState {
     pub skill_manager: Arc<SkillManager>,
     pub cancel_tokens: Arc<RwLock<HashMap<String, tokio_util::sync::CancellationToken>>>,
     pub config: Arc<ConfigManager>,
+    pub masking: Arc<MaskingConfigManager>,
+    pub prompt_manager: Arc<PromptManager>,
+    pub memory_manager: Arc<MemoryManager>,
     // 新增: Gateway 和 EventBus
     pub gateway: Option<GatewayRef>,
     pub event_bus: Arc<EventBus>,
@@ -221,6 +226,23 @@ impl AppState {
             }
         }
 
+        let masking = MaskingConfigManager::load_default().await
+            .expect("Failed to load masking config");
+
+        let base_dir = dirs::home_dir()
+            .unwrap_or_else(|| std::env::temp_dir())
+            .join(".bamboo");
+        let prompt_storage = PromptStorage::new(base_dir.join("prompts"));
+        let prompt_manager = Arc::new(PromptManager::new(prompt_storage));
+        if let Err(e) = prompt_manager.ensure_default_prompt().await {
+            log::warn!("Failed to ensure default prompt: {}", e);
+        }
+
+        let memory_manager = Arc::new(MemoryManager::new(base_dir.join("memories")));
+        if let Err(e) = memory_manager.init().await {
+            log::warn!("Failed to initialize memory storage: {}", e);
+        }
+
         // 初始化 EventBus
         let event_bus = Arc::new(EventBus::new(1000));
 
@@ -245,6 +267,9 @@ impl AppState {
             skill_manager,
             cancel_tokens: Arc::new(RwLock::new(HashMap::new())),
             config: Arc::new(config_manager),
+            masking: Arc::new(masking),
+            prompt_manager,
+            memory_manager,
             gateway,
             event_bus,
         }
@@ -396,6 +421,13 @@ impl AppState {
     /// Create a ToolExecutor for use with agent_runner
     pub fn create_tool_executor(&self) -> Arc<dyn ToolExecutor> {
         Arc::new(SkillManagerToolExecutor::new(self.skill_manager.clone()))
+    }
+
+    /// 发布配置变更通知
+    pub fn notify_config_updated(&self, sections: Vec<String>) {
+        if let Err(e) = self.event_bus.publish(Event::ConfigUpdated { sections }) {
+            log::warn!("Failed to publish config update event: {}", e);
+        }
     }
 }
 
@@ -549,6 +581,9 @@ impl Clone for AppState {
             skill_manager: self.skill_manager.clone(),
             cancel_tokens: self.cancel_tokens.clone(),
             config: self.config.clone(),
+            masking: self.masking.clone(),
+            prompt_manager: self.prompt_manager.clone(),
+            memory_manager: self.memory_manager.clone(),
             gateway: self.gateway.clone(),
             event_bus: self.event_bus.clone(),
         }
@@ -649,6 +684,15 @@ async fn create_llm_provider_from_config(
             let provider = OpenAiProvider::with_config(provider_config).await
                 .map_err(|e| anyhow::anyhow!(
                     "Failed to create Copilot provider: {}",
+                    e
+                ))?;
+            Ok(Arc::new(provider))
+        }
+        "anthropic" => {
+            log::info!("Creating Anthropic provider with API key authentication");
+            let provider = bamboo_llm::AnthropicProvider::with_config(provider_config).await
+                .map_err(|e| anyhow::anyhow!(
+                    "Failed to create Anthropic provider: {}",
                     e
                 ))?;
             Ok(Arc::new(provider))

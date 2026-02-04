@@ -1,8 +1,12 @@
 use tokio::sync::mpsc;
+use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 use crate::agent::{Session, Message, AgentEvent, events::TokenUsage};
 use crate::tools::ToolExecutor;
+use crate::types::{Content, ContentPart};
+use bamboo_masking::MaskingConfig;
 use thiserror::Error;
+use std::sync::Arc;
 
 #[derive(Error, Debug)]
 pub enum AgentError {
@@ -38,6 +42,7 @@ impl Default for AgentConfig {
 pub struct AgentLoop<E: ToolExecutor> {
     config: AgentConfig,
     tool_executor: E,
+    masking: Option<Arc<RwLock<MaskingConfig>>>,
 }
 
 impl<E: ToolExecutor> AgentLoop<E> {
@@ -45,7 +50,24 @@ impl<E: ToolExecutor> AgentLoop<E> {
         Self {
             config,
             tool_executor,
+            masking: None,
         }
+    }
+
+    pub fn with_masking(
+        config: AgentConfig,
+        tool_executor: E,
+        masking: Option<Arc<RwLock<MaskingConfig>>>,
+    ) -> Self {
+        Self {
+            config,
+            tool_executor,
+            masking,
+        }
+    }
+
+    pub fn set_masking(&mut self, masking: Option<Arc<RwLock<MaskingConfig>>>) {
+        self.masking = masking;
     }
 
     pub async fn run(
@@ -57,6 +79,8 @@ impl<E: ToolExecutor> AgentLoop<E> {
     ) -> Result<()> {
         // 添加用户消息
         session.add_message(Message::user(initial_message));
+
+        let _masked_messages = self.mask_messages(&session.messages).await;
         
         for _round in 0..self.config.max_rounds {
             // 检查取消
@@ -81,4 +105,40 @@ impl<E: ToolExecutor> AgentLoop<E> {
 
         Ok(())
     }
+
+    async fn mask_messages(&self, messages: &[Message]) -> Vec<Message> {
+        let masking = match &self.masking {
+            Some(masking) => masking.read().await,
+            None => return messages.to_vec(),
+        };
+
+        messages
+            .iter()
+            .map(|message| apply_masking_to_message(&masking, message))
+            .collect()
+    }
+}
+
+fn apply_masking_to_message(config: &MaskingConfig, message: &Message) -> Message {
+    let mut masked = message.clone();
+    let content = match &message.content {
+        Content::Text { text } => Content::Text {
+            text: config.apply_to_text(text),
+        },
+        Content::Parts { parts } => {
+            let masked_parts = parts
+                .iter()
+                .map(|part| match part {
+                    ContentPart::Text { text } => ContentPart::Text {
+                        text: config.apply_to_text(text),
+                    },
+                    other => other.clone(),
+                })
+                .collect();
+            Content::Parts { parts: masked_parts }
+        }
+    };
+
+    masked.content = content;
+    masked
 }

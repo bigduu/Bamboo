@@ -16,6 +16,7 @@ dirs = "5.0"
 thiserror = "1"
 tracing = "0.1"
 regex = "1"
+bamboo-masking = { path = "../bamboo-masking" }
 
 [features]
 default = ["hot-reload"]
